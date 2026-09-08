@@ -1,0 +1,12 @@
+# Godot
+game/.godot/
+game/*.tmp
+
+# Blender
+*.blend1
+*.blend2
+__pycache__/
+
+# Misc
+*.import.tmp
+.DS_Store
