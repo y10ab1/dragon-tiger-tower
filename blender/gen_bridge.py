@@ -24,14 +24,50 @@ PATH = [(0, 0), (0, -6), (4, -6), (4, -13), (-2.5, -13), (-2.5, -20),
         (3, -20), (3, -27), (0, -27), (0, -33)]
 
 
+def build_deck():
+    """Union the axis-aligned bridge and pavilion footprints into one surface.
+
+    Adjacent segment boxes used to draw the same corner twice; shadowed
+    multipass WebGL made their coplanar faces fight at grazing angles.
+    """
+    half = DECK_W / 2
+    rectangles = [(min(a[0], b[0]) - half, max(a[0], b[0]) + half,
+                   min(a[1], b[1]) - half, max(a[1], b[1]) + half)
+                  for a, b in zip(PATH, PATH[1:])]
+    rectangles.append((-4.5, 4.5, -42.0, -33.0))  # pavilion floor
+    xs = sorted({v for r in rectangles for v in r[:2]})
+    ys = sorted({v for r in rectangles for v in r[2:]})
+    cells = set()
+    for i in range(len(xs) - 1):
+        for j in range(len(ys) - 1):
+            x, y = (xs[i] + xs[i + 1]) / 2, (ys[j] + ys[j + 1]) / 2
+            if any(x0 < x < x1 and y0 < y < y1 for x0, x1, y0, y1 in rectangles):
+                cells.add((i, j))
+    verts, faces = [], []
+    for i, j in sorted(cells):
+        n = len(verts)
+        corners = [(xs[i], ys[j]), (xs[i + 1], ys[j]),
+                   (xs[i + 1], ys[j + 1]), (xs[i], ys[j + 1])]
+        verts += [(x, y, z) for z in (-0.3, 0) for x, y in corners]
+        faces += [(n + 3, n + 2, n + 1, n), (n + 4, n + 5, n + 6, n + 7)]
+        for edge, neighbor in enumerate(((i, j - 1), (i + 1, j), (i, j + 1), (i - 1, j))):
+            if neighbor not in cells:
+                a, b = n + edge, n + (edge + 1) % 4
+                faces.append((a, b, b + 4, a + 4))
+    mesh = bpy.data.meshes.new("ContinuousBridgeDeck")
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new("ContinuousBridgeDeck", mesh)
+    bpy.context.collection.objects.link(obj)
+    mesh.materials.append(P["stone"])
+    return obj
+
+
 def segment(parts, rails, x0, y0, x1, y1):
     dx, dy = x1 - x0, y1 - y0
     L = math.hypot(dx, dy)
     ang = math.atan2(dy, dx)
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
-    # deck
-    parts.append(box("deck", (L + DECK_W, DECK_W, 0.3), (cx, cy, -0.15),
-                     P["stone"], rot=(0, 0, ang)))
     # side kerbs
     for s in (-1, 1):
         ox = -s * math.sin(ang) * (DECK_W / 2 - 0.1)
@@ -54,9 +90,9 @@ def segment(parts, rails, x0, y0, x1, y1):
                              (px, py, RAIL_H / 2), P["stone"],
                              rot=(0, 0, ang)))
             rails.append(box("postCap", (0.2, 0.2, 0.08),
-                             (px, py, RAIL_H + 0.02), P["stone"],
+                             (px, py, RAIL_H + 0.07), P["stone"],
                              rot=(0, 0, ang)))
-            if p == n_posts:
+            if p == n_posts or spacing <= 0.3:
                 continue
             mx = px + spacing * 0.5 * math.cos(ang)
             my = py + spacing * 0.5 * math.sin(ang)
@@ -66,7 +102,7 @@ def segment(parts, rails, x0, y0, x1, y1):
             rails.append(box("panelField", (spacing - 0.27, 0.11, 0.43),
                              (mx, my, 0.6), P["stone"], rot=(0, 0, ang)))
             for z in (0.3, 0.91):
-                rails.append(box("panelMoulding", (spacing, 0.18, 0.1),
+                rails.append(box("panelMoulding", (spacing, 0.16, 0.1),
                                  (mx, my, z), P["stone"], rot=(0, 0, ang)))
     # piles into the water
     for t in (-0.3, 0.3):
@@ -90,7 +126,6 @@ def corner_lanterns(deco):
 
 def pavilion(cx, cy):
     parts, deco = [], []
-    parts.append(box("pfloor", (9, 9, 0.5), (cx, cy, -0.25), P["stone"]))
     parts.append(box("pstep", (3.2, 1.4, 0.24), (cx, cy + 5.0, -0.32),
                      P["stone"]))
     for sx in (-1, 1):
@@ -158,7 +193,7 @@ def main():
     global P
     clear_scene()
     P = palette()
-    parts, rails, deco = [], [], []
+    parts, rails, deco = [build_deck()], [], []
     for i in range(len(PATH) - 1):
         x0, y0 = PATH[i]
         x1, y1 = PATH[i + 1]

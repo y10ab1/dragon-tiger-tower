@@ -84,8 +84,44 @@ def mesh_object(name, vertices, faces, material):
     mesh.update()
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
-    set_mat(obj, material)
+    if material is not None:
+        set_mat(obj, material)
     return obj
+
+
+def clipped_slab(cx, cy, radius, z, angle, bounds):
+    """Clip an octagonal floor to a rectangle, preserving the stair opening."""
+    polygon = [(radius * math.cos(math.pi / 8 + k * math.pi / 4),
+                radius * math.sin(math.pi / 8 + k * math.pi / 4)) for k in range(8)]
+    x0, x1, y0, y1 = bounds
+    for axis, value, sign in ((0, x0, 1), (0, x1, -1), (1, y0, 1), (1, y1, -1)):
+        result = []
+        for a, b in zip(polygon, polygon[1:] + polygon[:1]):
+            da, db = sign * (a[axis] - value), sign * (b[axis] - value)
+            if da >= 0:
+                result.append(a)
+            if (da >= 0) != (db >= 0):
+                t = da / (da - db)
+                result.append(tuple(a[k] + t * (b[k] - a[k]) for k in range(2)))
+        polygon = result
+    ca, sa = math.cos(angle), math.sin(angle)
+    n = len(polygon)
+    vertices = [(cx + x * ca - y * sa, cy + x * sa + y * ca, h)
+                for h in (z - 0.22, z) for x, y in polygon]
+    faces = [tuple(reversed(range(n))), tuple(range(n, n * 2))]
+    faces += [(j, (j + 1) % n, (j + 1) % n + n, j + n) for j in range(n)]
+    return mesh_object("octagonal_slab", vertices, faces, P["wall_in"])
+
+
+def stair_prism(cx, cy, z, angle, profile, width, material):
+    """Extrude an X/Z profile: no intersecting step boxes or hollow collision."""
+    ca, sa = math.cos(angle), math.sin(angle)
+    n = len(profile)
+    vertices = [(cx + x * ca - y * sa, cy + x * sa + y * ca, z + h)
+                for y in (-1.4 - width / 2, -1.4 + width / 2) for x, h in profile]
+    faces = [tuple(range(n)), tuple(reversed(range(n, n * 2)))]
+    faces += [(j, j + n, (j + 1) % n + n, (j + 1) % n) for j in range(n)]
+    return mesh_object("solid_stair", vertices, faces, material)
 
 
 def molding(name, points, radius, material):
@@ -116,6 +152,7 @@ def molding(name, points, radius, material):
 
 def eaves(parts, cx, cy, radius, z, crown=False):
     """Eight continuous curved roof facets, rolled tiles and green hip ridges."""
+    start = len(parts)
     inner = 0.35 if crown else radius - 0.06
     outer = radius + 1.65
     rise = 1.95 if crown else 0.72
@@ -154,6 +191,8 @@ def eaves(parts, cx, cy, radius, z, crown=False):
         hip += [(x + dx * 0.035, y + dy * 0.035, tip + 0.22),
                 (x + dx * 0.045, y + dy * 0.045, tip + 0.43)]
         parts.append(molding("upturned_hip", hip, 0.095, P["jade"]))
+    # Keep the working scene small while regenerating detailed towers.
+    parts[start:] = [join(parts[start:], "RoofTier")]
 
 
 def gallery(parts, deco, cx, cy, r, z0, tier):
@@ -166,10 +205,13 @@ def gallery(parts, deco, cx, cy, r, z0, tier):
         length = 2 * outer * math.sin(math.pi / 8)
         x, y = cx + ri * ca, cy + ri * sa
         # Thin annular deck never covers the tower's interior stair openings.
-        parts.append(box("gallery_deck", (outer - r + 0.25, length, 0.18),
-                         (cx + (ri - (outer - r) / 2) * ca,
-                          cy + (ri - (outer - r) / 2) * sa, z0 - 0.09),
-                         P["white"], rot=(0, 0, a)))
+        if tier > 0:
+            # Ground already has the plaza; upper balconies sit just below
+            # the room slab so the overlap hidden in the wall cannot flicker.
+            parts.append(box("gallery_deck", (outer - r + 0.25, length, 0.18),
+                             (cx + (ri - (outer - r) / 2) * ca,
+                              cy + (ri - (outer - r) / 2) * sa, z0 - 0.11),
+                             P["white"], rot=(0, 0, a)))
         if tier > 0 or k != 6:
             for h in (0.22, 0.8):
                 parts.append(box("white_rail", (0.13, length, 0.12),
@@ -199,13 +241,12 @@ def gallery(parts, deco, cx, cy, r, z0, tier):
 
 def build_pagoda(cx, cy, prefix):
     """Build one 7-story octagonal pagoda at (cx, cy). Door faces -Y."""
-    body, roofs, stairs_vis, ramps, deco = [], [], [], [], []
+    body, roofs, stairs_vis, ramps, deco, floors, shell = [], [], [], [], [], [], []
 
     for i in range(TIERS):
         r = R0 - R_STEP * i
         z0 = i * TIER_H
         ri = r * math.cos(math.pi / 8)
-        w = 0.92 * ri                      # interior slab half-width
 
         # --- walls (8 sides), k=0 east, k=2 north, k=4 west, k=6 south
         for k in range(8):
@@ -220,6 +261,10 @@ def build_pagoda(cx, cy, prefix):
                 opening = (1.65, 0.4, 2.5) if k % 2 else (1.3, 1.0, 2.3)
             arched = opening is not None and (i > 0 or k != 6)
             wall_side(body, cx, cy, z0, a, r, TIER_H, opening, arched)
+            # Smooth collision envelope across the windows; the doorway is
+            # the only opening a player should enter. Ornament stays visual.
+            wall_side(shell, cx, cy, z0, a, r, TIER_H,
+                      (2.0, 0.0, 2.5) if i == 0 and k == 6 else None)
             if arched:
                 ow, bottom, top = opening
                 points = [(-ow / 2, bottom), (-ow / 2, top - ow / 2)]
@@ -247,30 +292,21 @@ def build_pagoda(cx, cy, prefix):
             rot_prev = -(i - 1) * math.pi / 2
             # corridor hole over the stair flight below (ends before the
             # far edge so the player lands onto solid floor)
-            hole = (-1.0, 2.7, -2.25, -0.55)  # x0,x1,y0,y1 prev-stair frame
+            hole = (-1.0, 2.4, -2.35, -0.45)  # shorter end leaves a wider turning landing
             ca, sa = math.cos(rot_prev), math.sin(rot_prev)
 
-            def slab_piece(x0, x1, y0, y1):
-                lx, ly = (x0 + x1) / 2, (y0 + y1) / 2
-                gx = cx + lx * ca - ly * sa
-                gy = cy + lx * sa + ly * ca
-                b = box("slab", (x1 - x0, y1 - y0, 0.22),
-                        (gx, gy, z0 - 0.11), P["wall_in"],
-                        rot=(0, 0, rot_prev))
-                body.append(b)
-
             hx0, hx1, hy0, hy1 = hole
-            slab_piece(-w, hx0, -w, w)
-            slab_piece(hx1, w, -w, w)
-            slab_piece(hx0, hx1, -w, hy0)
-            slab_piece(hx0, hx1, hy1, w)
+            for bounds in ((-r, hx0, -r, r), (hx1, r, -r, r),
+                           (hx0, hx1, -r, hy0), (hx0, hx1, hy1, r)):
+                floors.append(clipped_slab(cx, cy, r, z0, rot_prev, bounds))
             # guard rail on inner edge of the hole (stops short of the
             # landing so the walk path around the hole stays clear)
-            rl = (hx1 - 0.45) - hx0
-            gx = cx + ((hx0 + hx1 - 0.45) / 2) * ca - (hy1 + 0.12) * sa
-            gy = cy + ((hx0 + hx1 - 0.45) / 2) * sa + (hy1 + 0.12) * ca
-            body.append(box("rail", (rl, 0.1, 0.9), (gx, gy, z0 + 0.45),
-                            P["wood_dk"], rot=(0, 0, rot_prev)))
+            rail_end = 1.85
+            rl = rail_end - hx0
+            gx = cx + ((hx0 + rail_end) / 2) * ca - (hy1 + 0.12) * sa
+            gy = cy + ((hx0 + rail_end) / 2) * sa + (hy1 + 0.12) * ca
+            floors.append(box("rail", (rl, 0.1, 0.9), (gx, gy, z0 + 0.45),
+                              P["wood_dk"], rot=(0, 0, rot_prev)))
 
         # --- stairs (tiers 0..5) going up along local +X at y=-1.4
         if i < TIERS - 1:
@@ -279,32 +315,24 @@ def build_pagoda(cx, cy, prefix):
             n_steps = 14
             run0, run1 = -2.2, 2.2
             step_run = (run1 - run0) / n_steps
-            for s in range(n_steps):
-                lx = run0 + (s + 0.5) * step_run
-                ly = -1.4
-                gx = cx + lx * ca - ly * sa
-                gy = cy + lx * sa + ly * ca
+            profile = [(run0, 0), (run1, 0), (run1, TIER_H)]
+            for s in reversed(range(n_steps)):
+                lx = run0 + s * step_run
                 h = (s + 1) * TIER_H / n_steps
-                stairs_vis.append(box(
-                    "step", (step_run, 1.2, h),
-                    (gx, gy, z0 + h / 2), P["wood"], rot=(0, 0, rot_i)))
-            # collision ramp (invisible in game)
-            mx, my = 0.0, -1.4
-            gx = cx + mx * ca - my * sa
-            gy = cy + mx * sa + my * ca
-            ang = math.atan2(TIER_H, run1 - run0)
-            L = math.hypot(TIER_H, run1 - run0)
-            ramps.append(box("ramp", (L, 1.2, 0.18),
-                             (gx, gy, z0 + TIER_H / 2),
-                             None, rot=(0, ang, rot_i + math.pi)))
-            # landing plate bridging flight top and the slab hole end
-            lgx = cx + 2.5 * ca - (-1.4) * sa
-            lgy = cy + 2.5 * sa + (-1.4) * ca
-            ramps.append(box("landing", (0.7, 1.7, 0.2),
+                profile.append((lx, h))
+                if s > 0:
+                    profile.append((lx, s * TIER_H / n_steps))
+            stairs_vis.append(stair_prism(cx, cy, z0, rot_i, profile, 1.5, P["wood"]))
+            ramps.append(stair_prism(cx, cy, z0, rot_i,
+                                    [(run0, 0), (run1, 0), (run1, TIER_H)], 1.5, None))
+            # One flush landing ends exactly at the shortened floor opening.
+            lgx = cx + 2.3 * ca - (-1.4) * sa
+            lgy = cy + 2.3 * sa + (-1.4) * ca
+            ramps.append(box("landing", (0.2, 1.9, 0.2),
                              (lgx, lgy, z0 + TIER_H - 0.1), None,
                              rot=(0, 0, rot_i)))
-            stairs_vis.append(box("landing_vis", (0.7, 1.7, 0.08),
-                                  (lgx, lgy, z0 + TIER_H - 0.05),
+            stairs_vis.append(box("landing_vis", (0.2, 1.9, 0.08),
+                                  (lgx, lgy, z0 + TIER_H - 0.04),
                                   P["wood"], rot=(0, 0, rot_i)))
 
         # Keep the center hollow so the roof does not cross the stair flight.
@@ -324,7 +352,9 @@ def build_pagoda(cx, cy, prefix):
         deco.append(cyl("finial_lip", radius, 0.055, (cx, cy, height - 0.11),
                         P["tile_light"], verts=8))
 
-    join(body, f"{prefix}Body-col")
+    join(body, f"{prefix}Body")
+    join(shell, f"{prefix}Shell-colonly")
+    join(floors, f"{prefix}Floors-col")
     # Decorative tile rolls do not need thousands of physics triangles.
     join(roofs, f"{prefix}Roof")
     join(stairs_vis, f"{prefix}Stairs")

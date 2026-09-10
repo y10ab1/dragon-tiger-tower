@@ -38,6 +38,13 @@ jobs:
           echo "GODOT=$RUNNER_TEMP/godot/Godot_v${GODOT_VERSION}-stable_linux.x86_64" >> "$GITHUB_ENV"
       - name: Export Web
         run: bash scripts/export-web.sh
+      - name: Verify tower traversal and gameplay
+        run: |
+          "$GODOT" --headless --path game --fixed-fps 60 --script res://scripts/debug_tower_edges.gd
+          "$GODOT" --headless --path game --fixed-fps 60 --script res://scripts/debug_tower_walk.gd
+          "$GODOT" --headless --path game --fixed-fps 60 res://scenes/debug_stairs.tscn
+          "$GODOT" --headless --path game --fixed-fps 60 res://scenes/debug_entrances.tscn
+          "$GODOT" --headless --path game --fixed-fps 60 res://scenes/debug_gameplay.tscn
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web

@@ -12,6 +12,8 @@ radius = 0.35
 height = 1.8
 
 [node name="Player" type="CharacterBody3D" groups=["player"]]
+floor_snap_length = 0.25
+max_slides = 8
 script = ExtResource("1")
 
 [node name="Collision" type="CollisionShape3D" parent="."]
@@ -29,6 +31,8 @@ far = 220.0
 light_color = Color(1, 0.92, 0.78, 1)
 light_energy = 6.0
 shadow_enabled = true
+shadow_bias = 0.3
+shadow_normal_bias = 2.0
 spot_range = 14.0
 spot_angle = 27.0
 spot_angle_attenuation = 1.4

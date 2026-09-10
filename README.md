@@ -99,6 +99,12 @@ godot --headless res://scenes/debug_stairs.tscn --quit-after 3000
 godot --headless res://scenes/debug_climb.tscn --quit-after 40000
 # 龍虎入口往返測試（從廣場穿過獸口，走到塔內門廳再返回）
 godot --headless res://scenes/debug_entrances.tscn
+# 雙塔六段樓梯、三條行走路徑的上樓／下樓往返
+godot --headless --fixed-fps 60 --script res://scripts/debug_tower_walk.gd
+# 窗洞防卡、貼牆退回、樓板邊緣與樓梯側面碰撞
+godot --headless --script res://scripts/debug_tower_edges.gd
+# WebGL 相容模式的近距離陰影比較圖（需要顯示器）
+godot --rendering-method gl_compatibility --script res://scripts/debug_shadows.gd
 # 玩法整合測試（追擊致死／手電筒驅退／勝利條件）
 godot --headless res://scenes/debug_gameplay.tscn --quit-after 30000
 # 視角、滑鼠鎖定、手電筒遮擋與 HUD 測試（需要顯示器，不能用 --headless）
@@ -141,5 +147,9 @@ game/               # Godot 4 專案
   用於樓梯坡道與樓梯口銜接平台），由 Godot 匯入時自動建立 StaticBody。
 - 塔內樓梯每層旋轉 -90°，樓板開口為走廊型並附防護欄杆，
   淨空經過爬塔機器人驗證。
+- 塔內採用連續牆面碰撞、接牆八角樓板與實心斜坡碰撞，避免鑽進窗洞或樓梯底部。
+  梯頂縮短樓板開口、加寬轉身空間；窗戶保留可見外觀，但不作通行入口。
+- 九曲橋橋面由平面聯集生成，轉角不再疊放共面方塊。手電筒使用較高精度的
+  陰影深度與偏移設定，減少 WebGL 近距離斜紋。
 - 鬼魂 AI：遊蕩（路徑點）→ 追擊（視線＋距離）→ 被手電筒驅退，
   三態狀態機。
