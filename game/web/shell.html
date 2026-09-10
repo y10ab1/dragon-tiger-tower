@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d1112">
+  <meta name="description" content="以高雄左營龍虎塔為舞台的第一人稱民俗恐怖遊戲。持燈驅煞，集齊七符，由龍口離境。免費線上遊玩。">
+  <title>$GODOT_PROJECT_NAME｜線上遊玩</title>
+  <style>
+    :root { color-scheme: dark; --paper: #dfd0ac; --muted: #a99c82; --gold: #c29c55; --red: #912e20; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; background: #090b0c; color: var(--paper); }
+    body { overflow: hidden; font-family: "Kaiti TC", "KaiTi", "DFKai-SB", "Noto Serif TC", serif; }
+    #canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
+    [hidden] { display: none !important; }
+    #entrance { position: fixed; inset: 0; overflow: auto; display: grid; place-items: center; padding: 36px 24px;
+      background: radial-gradient(ellipse at 50% 10%, #213031 0, #101719 42%, #090b0c 80%); }
+    #entrance::before { content: ""; position: fixed; inset: 18px; border: 1px solid #b28b4530; pointer-events: none; }
+    .card { width: min(640px, 100%); text-align: center; }
+    .eyebrow { color: var(--muted); font: 12px/1.8 system-ui, sans-serif; letter-spacing: .32em; }
+    .seal { display: inline-block; padding: 8px 10px; margin: 25px 0 0; border: 1px solid #ce6a44; background: #75231699; color: #efc9a9; writing-mode: vertical-rl; letter-spacing: .2em; }
+    h1 { font-size: clamp(52px, 12vw, 90px); font-weight: 400; letter-spacing: .18em; margin: 12px 0 0; padding-left: .18em; }
+    .subtitle { font-size: 21px; letter-spacing: .65em; color: var(--gold); margin: 8px 0 24px; padding-left: .65em; }
+    .story { line-height: 2; color: var(--muted); font-size: 17px; }
+    .rule { width: 64px; height: 1px; background: var(--gold); margin: 24px auto; }
+    button { border: 1px solid var(--gold); padding: 14px 36px; margin: 10px; background: #75291e; color: #f3e3c0; font: inherit; font-size: 21px; letter-spacing: .2em; cursor: pointer; min-width: 240px; }
+    button:hover:not(:disabled) { background: #963828; }
+    button:focus-visible { outline: 2px solid #f2d698; outline-offset: 5px; }
+    button:disabled { opacity: .6; cursor: wait; }
+    #status { min-height: 28px; color: var(--gold); font: 14px/1.7 system-ui, sans-serif; margin: 12px auto; max-width: 540px; overflow-wrap: anywhere; }
+    progress { width: min(360px, 100%); height: 5px; accent-color: var(--gold); }
+    .keys { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px 18px; margin: 24px 0 14px; color: #c4b79f; font: 13px/1.9 system-ui, sans-serif; }
+    kbd { color: #ead5a9; border-bottom: 1px solid #806940; padding: 3px; font: inherit; }
+    .note, footer { color: #958a77; font: 12px/1.8 system-ui, sans-serif; }
+    footer { margin-top: 30px; }
+    a { color: #bbab89; text-underline-offset: 4px; }
+    #error { color: #edaa96; font: 13px/1.6 system-ui, sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; }
+    @media (max-height: 700px) { .seal { margin-top: 10px; } h1 { font-size: 56px; } .rule { margin: 14px auto; } footer { margin-top: 16px; } }
+  </style>
+  $GODOT_HEAD_INCLUDE
+</head>
+<body>
+  <canvas id="canvas" tabindex="0" aria-label="龍虎塔遊戲畫面，點一下鎖定滑鼠；按 Esc 釋放。">此瀏覽器不支援 Canvas。</canvas>
+  <main id="entrance">
+    <section class="card" aria-labelledby="title">
+      <div class="eyebrow">KAOHSIUNG · LOTUS POND · MIDNIGHT</div>
+      <div class="seal" aria-hidden="true">禁入</div>
+      <h1 id="title">龍虎塔</h1>
+      <p class="subtitle">虎口入</p>
+      <p class="story">龍口進，虎口出。你卻逆了規矩。<br>尋齊七道鎮煞符，持燈直照，從龍口離開。</p>
+      <div class="rule"></div>
+      <button id="start" type="button">踏入虎口</button>
+      <progress id="progress" aria-label="遊戲下載進度" hidden></progress>
+      <p id="status" role="status" aria-live="polite">首次需下載遊戲素材。載入後，點一下畫面開始。</p>
+      <p id="error" role="alert" hidden></p>
+      <div class="keys" aria-label="操作說明">
+        <span><kbd>滑鼠</kbd> 轉向</span><span><kbd>WASD</kbd> 行走</span><span><kbd>F</kbd> 手電筒</span>
+        <span><kbd>Shift</kbd> 疾行</span><span><kbd>Space</kbd> 跳躍</span><span><kbd>R</kbd> 重來</span><span><kbd>Esc</kbd> 釋放滑鼠</span>
+      </div>
+      <p class="note">請使用電腦與鍵盤、滑鼠遊玩。建議 Chrome、Edge 或 Firefox。<br>照中虎靈時，持續照射直到金色圓弧填滿。</p>
+      <footer><a href="https://github.com/y10ab1/dragon-tiger-tower" target="_blank" rel="noopener noreferrer">遊戲原始碼</a> · <a href="font-license.txt" target="_blank" rel="noopener noreferrer">字型授權</a> · Made with Godot</footer>
+      <noscript><p>請啟用 JavaScript，才能執行此網頁遊戲。</p></noscript>
+    </section>
+  </main>
+  <script src="$GODOT_URL"></script>
+  <script>
+    const config = $GODOT_CONFIG;
+    const engine = new Engine(config);
+    const canvas = document.getElementById('canvas');
+    const entrance = document.getElementById('entrance');
+    const start = document.getElementById('start');
+    const progress = document.getElementById('progress');
+    const status = document.getElementById('status');
+    const errorBox = document.getElementById('error');
+    let failed = false;
+
+    function fail(error) {
+      console.error(error);
+      failed = true;
+      entrance.hidden = false;
+      progress.hidden = true;
+      status.textContent = '遊戲未能啟動，請重新載入，或使用支援 WebGL 2 的瀏覽器。';
+      errorBox.textContent = error instanceof Error ? error.message : String(error);
+      errorBox.hidden = false;
+      start.textContent = '重新載入';
+      start.disabled = false;
+    }
+
+    start.addEventListener('click', () => {
+      if (failed) { window.location.reload(); return; }
+      const missing = Engine.getMissingFeatures({ threads: false });
+      if (missing.length) { fail('缺少瀏覽器功能：' + missing.join('、')); return; }
+      start.disabled = true;
+      start.textContent = '潭霧漸起……';
+      progress.hidden = false;
+      status.textContent = '下載遊戲中……';
+      engine.startGame({
+        canvas,
+        onProgress(current, total) {
+          if (total > 0) {
+            progress.max = total;
+            progress.value = current;
+            const percent = Math.round(current / total * 100);
+            status.textContent = percent < 100 ? `下載遊戲中 ${percent}%` : '素材已就緒，正在喚醒潭中倒影……';
+          } else {
+            progress.removeAttribute('value');
+          }
+        },
+        onExit(code) { fail(`遊戲已結束（${code}），可重新載入。`); },
+      }).then(() => {
+        entrance.hidden = true;
+        canvas.focus();
+        window.dispatchEvent(new Event('resize'));
+      }).catch(fail);
+    });
+    canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+    document.addEventListener('keydown', (event) => {
+      if (document.activeElement === canvas && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) {
+        event.preventDefault();
+      }
+    });
+  </script>
+</body>
+</html>

@@ -34,6 +34,8 @@ const GHOST_WAYPOINTS: Array[Vector3] = [
 
 var collected := 0
 var _whisper_cd := 12.0
+var _message_time := 0.0
+var _waiting_for_web_player := OS.has_feature("web")
 
 @onready var player: CharacterBody3D = $Player
 @onready var ghost: CharacterBody3D = $Ghost
@@ -57,13 +59,27 @@ func _ready() -> void:
 	player.escaped.connect(_on_player_escaped)
 	$ExitZone.body_entered.connect(_on_exit_zone)
 	_update_counter()
-	_show_message("深夜，你從「虎口」走了進來……犯了大忌。\n" +
-			"收集七張符咒，再從「龍口」離開，方可化解厄運。\n\n" +
-			"WASD 移動｜Shift 衝刺｜F 手電筒｜空白鍵 跳躍", 9.0)
+	_show_message("龍口進，虎口出。你卻逆了規矩……\n" +
+			"尋齊七道鎮煞符；遇見祂，持燈直照，別回頭。", 9.0)
+	if _waiting_for_web_player:
+		player.set_physics_process(false)
+		ghost.set_physics_process(false)
 
 
 func _process(delta: float) -> void:
 	stamina_bar.scale.x = player.stamina / player.STAMINA_MAX
+	$UI.update_state(player, ghost)
+	if _waiting_for_web_player:
+		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+			return
+		_waiting_for_web_player = false
+		player.set_physics_process(true)
+		ghost.set_physics_process(true)
+	if _message_time > 0.0 and not player.dead and not player.won:
+		_message_time -= delta
+		message_label.modulate.a = minf(1.0, maxf(0.0, _message_time) / 0.5)
+		if _message_time <= 0.0:
+			message_label.hide()
 	# heartbeat when the wraith hunts you
 	if ghost.state == 1 and not player.dead and not player.won:
 		if not heartbeat.playing:
@@ -81,6 +97,7 @@ func _process(delta: float) -> void:
 
 # ---------------------------------------------------------------- environment
 func _setup_environment() -> void:
+	var compatibility := RenderingServer.get_current_rendering_method() == "gl_compatibility"
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.006, 0.009, 0.016)
@@ -92,11 +109,11 @@ func _setup_environment() -> void:
 	env.fog_light_color = Color(0.035, 0.05, 0.075)
 	env.fog_density = 0.022
 	env.fog_sky_affect = 1.0
-	env.volumetric_fog_enabled = true
+	env.volumetric_fog_enabled = not compatibility
 	env.volumetric_fog_density = 0.025
 	env.volumetric_fog_albedo = Color(0.6, 0.7, 0.8)
 	env.volumetric_fog_length = 80.0
-	env.glow_enabled = true
+	env.glow_enabled = not compatibility
 	env.glow_intensity = 0.6
 	env.glow_bloom = 0.1
 	var we := WorldEnvironment.new()
@@ -173,7 +190,9 @@ func _on_player_died() -> void:
 	fade_rect.color = Color(0.25, 0.0, 0.0, 0.0)
 	tw.tween_property(fade_rect, "color", Color(0.02, 0.0, 0.0, 1.0), 1.2)
 	message_label.text = "虎靈把你拖進了黑暗……\n\n按 R 重新來過"
+	message_label.modulate.a = 1.0
 	message_label.visible = true
+	$UI.show_ending(false)
 
 
 func _on_player_escaped() -> void:
@@ -183,17 +202,17 @@ func _on_player_escaped() -> void:
 	fade_rect.color = Color(1.0, 0.98, 0.9, 0.0)
 	tw.tween_property(fade_rect, "color", Color(1.0, 0.98, 0.9, 1.0), 3.0)
 	message_label.text = "你從龍口踏出，厄運盡除。\n遠方的天，亮了。\n\n按 R 再玩一次"
+	message_label.modulate.a = 1.0
 	message_label.visible = true
+	$UI.show_ending(true)
 
 
 func _update_counter() -> void:
-	counter_label.text = "符咒 %d／%d" % [collected, TOTAL_TALISMANS]
+	counter_label.text = "鎮煞符　%d／%d" % [collected, TOTAL_TALISMANS]
 
 
 func _show_message(text: String, duration: float) -> void:
 	message_label.text = text
+	message_label.modulate.a = 1.0
 	message_label.visible = true
-	var timer := get_tree().create_timer(duration)
-	timer.timeout.connect(func() -> void:
-		if not player.dead and not player.won:
-			message_label.visible = false)
+	_message_time = duration

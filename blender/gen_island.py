@@ -6,10 +6,13 @@ Run:  blender -b -P gen_island.py
 import math
 import os
 import sys
+import bpy
+from mathutils import Vector
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from common import (clear_scene, palette, box, cyl, cone, sphere, join,
+from common import (clear_scene, palette, box, cyl, sphere, join,
                     set_mat, export_glb)
+from statues import build_statues
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                    "..", "game", "assets", "models", "island.glb")
@@ -24,7 +27,8 @@ P = None  # palette dict
 
 
 # ----------------------------------------------------------------------------
-def wall_side(parts, cx, cy, z0, angle, half_r, height, opening=None):
+def wall_side(parts, cx, cy, z0, angle, half_r, height, opening=None,
+              arched=False):
     """One octagon side wall. angle = outward normal direction.
     opening = (width, z_bottom, z_top) relative to z0, or None."""
     ri = half_r * math.cos(math.pi / 8)          # inradius
@@ -51,8 +55,146 @@ def wall_side(parts, cx, cy, z0, angle, half_r, height, opening=None):
     piece((ow + side_w) / 2, side_w, 0, height)
     if ozb > 0:
         piece(0, ow, 0, ozb)              # sill
-    if ozt < height:
+    if arched:
+        # Fill above a semicircular opening, leaving a real hole, not a decal.
+        radius = ow / 2
+        spring = ozt - radius
+        verts, faces = [], []
+        for j in range(17):
+            t = math.pi - j * math.pi / 16
+            along = radius * math.cos(t)
+            bottom = spring + radius * math.sin(t)
+            for depth, z in ((-WALL_T / 2, bottom), (-WALL_T / 2, height),
+                             (WALL_T / 2, bottom), (WALL_T / 2, height)):
+                verts.append((wx + depth * ca - along * sa,
+                              wy + depth * sa + along * ca, z0 + z))
+        for j in range(16):
+            a = 4 * j
+            faces += [(a, a + 4, a + 5, a + 1),
+                      (a + 2, a + 3, a + 7, a + 6),
+                      (a, a + 2, a + 6, a + 4)]
+        parts.append(mesh_object("arch_wall", verts, faces, P["wall"]))
+    elif ozt < height:
         piece(0, ow, ozt, height)         # lintel
+
+
+def mesh_object(name, vertices, faces, material):
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(vertices, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    set_mat(obj, material)
+    return obj
+
+
+def molding(name, points, radius, material):
+    """Small polygonal tube, used for tile rolls and architectural trim."""
+    verts, faces = [], []
+    for j, point in enumerate(points):
+        tangent = Vector(points[min(j + 1, len(points) - 1)]) - Vector(
+            points[max(0, j - 1)])
+        tangent.normalize()
+        u = tangent.cross(Vector((0, 0, 1)))
+        if u.length < 0.01:
+            u = tangent.cross(Vector((0, 1, 0)))
+        u.normalize()
+        v = tangent.cross(u)
+        for k in range(6):
+            a = k * math.tau / 6
+            verts.append(Vector(point) + radius * (math.cos(a) * u + math.sin(a) * v))
+    for j in range(len(points) - 1):
+        for k in range(6):
+            a, b = j * 6 + k, j * 6 + (k + 1) % 6
+            faces.append((a, b, b + 6, a + 6))
+    faces += [tuple(reversed(range(6))), tuple(range(len(verts) - 6, len(verts)))]
+    obj = mesh_object(name, verts, faces, material)
+    for poly in obj.data.polygons:
+        poly.use_smooth = True
+    return obj
+
+
+def eaves(parts, cx, cy, radius, z, crown=False):
+    """Eight continuous curved roof facets, rolled tiles and green hip ridges."""
+    inner = 0.35 if crown else radius - 0.06
+    outer = radius + 1.65
+    rise = 1.95 if crown else 0.72
+
+    def point(side, u, t):
+        a, b = math.pi / 8 + side * math.pi / 4, math.pi / 8 + (side + 1) * math.pi / 4
+        r = inner + (outer - inner) * t
+        x = (1 - u) * math.cos(a) + u * math.cos(b)
+        y = (1 - u) * math.sin(a) + u * math.sin(b)
+        # Downward sweep turns upward at the outer edge, strongest at hips.
+        height = rise * (1 - t) ** 2 + 0.18 * t ** 8
+        height += 0.42 * abs(2 * u - 1) ** 6 * t ** 4
+        return (cx + r * x, cy + r * y, z + height)
+
+    for side in range(8):
+        verts = [point(side, j / 16, k / 8) for k in range(9) for j in range(17)]
+        faces = []
+        for k in range(8):
+            for j in range(16):
+                n = k * 17 + j
+                faces.append((n, n + 17, n + 18, n + 1))
+        parts.append(mesh_object("curved_tiles", verts, faces, P["roof"]))
+        for j in range(17):
+            points = [point(side, j / 16, k / 8) for k in range(9)]
+            parts.append(molding("tile_roll", points, 0.045, P["tile_light"]))
+        for t in (0.35, 0.65, 0.85):
+            parts.append(molding("tile_course", [point(side, j / 16, t)
+                                                  for j in range(17)], 0.018, P["roof_dk"]))
+        edge = [point(side, j / 16, 1) for j in range(17)]
+        parts.append(molding("green_fascia", [(x, y, z - 0.12) for x, y, z in edge],
+                             0.12, P["jade"]))
+        parts.append(molding("eave_lip", edge, 0.065, P["tile_light"]))
+        hip = [point(side, 0, k / 8) for k in range(9)]
+        x, y, tip = hip[-1]
+        dx, dy = x - cx, y - cy
+        hip += [(x + dx * 0.035, y + dy * 0.035, tip + 0.22),
+                (x + dx * 0.045, y + dy * 0.045, tip + 0.43)]
+        parts.append(molding("upturned_hip", hip, 0.095, P["jade"]))
+
+
+def gallery(parts, deco, cx, cy, r, z0, tier):
+    """Open white balustrades and painted brackets outside the existing stairs."""
+    outer = r + (1.05 if tier == 0 else 0.65)
+    for k in range(8):
+        a = k * math.pi / 4
+        ca, sa = math.cos(a), math.sin(a)
+        ri = outer * math.cos(math.pi / 8)
+        length = 2 * outer * math.sin(math.pi / 8)
+        x, y = cx + ri * ca, cy + ri * sa
+        # Thin annular deck never covers the tower's interior stair openings.
+        parts.append(box("gallery_deck", (outer - r + 0.25, length, 0.18),
+                         (cx + (ri - (outer - r) / 2) * ca,
+                          cy + (ri - (outer - r) / 2) * sa, z0 - 0.09),
+                         P["white"], rot=(0, 0, a)))
+        if tier > 0 or k != 6:
+            for h in (0.22, 0.8):
+                parts.append(box("white_rail", (0.13, length, 0.12),
+                                 (x, y, z0 + h), P["white"], rot=(0, 0, a)))
+            for j in range(7):
+                offset = (j / 6 - 0.5) * length
+                parts.append(box("baluster", (0.13, 0.13, 0.82),
+                                 (x - offset * sa, y + offset * ca, z0 + 0.41), P["white"]))
+        # Colorful beam courses and paired bracket blocks under each roof.
+        for h, material, width in ((2.28, "red", 0.20), (2.48, "jade", 0.27),
+                                    (2.64, "blue", 0.32)):
+            deco.append(box("painted_beam", (width, length, 0.13),
+                            (x, y, z0 + h), P[material], rot=(0, 0, a)))
+        for offset in (-length * 0.38, 0, length * 0.38):
+            for j in range(3):
+                deco.append(box("dougong", (0.3 + j * 0.18, 0.24 + j * 0.18, 0.13),
+                                (x - offset * sa, y + offset * ca, z0 + 2.03 + j * 0.17),
+                                P["jade" if j % 2 else "white"], rot=(0, 0, a)))
+    for k in range(8):
+        a = math.pi / 8 + k * math.pi / 4
+        x, y = cx + outer * math.cos(a), cy + outer * math.sin(a)
+        if tier == 0:
+            parts.append(cyl("vermilion_pillar", 0.20, 2.65,
+                             (x, y, z0 + 1.325), P["red"], verts=16))
+        parts.append(box("balcony_post", (0.22, 0.22, 1.0), (x, y, z0 + 0.5), P["white"]))
 
 
 def build_pagoda(cx, cy, prefix):
@@ -75,9 +217,22 @@ def build_pagoda(cx, cy, prefix):
                 elif k in (0, 4):
                     opening = (1.3, 1.2, 2.3)
             else:
-                if (k + i) % 2 == 0:
-                    opening = (1.3, 1.1, 2.3)
-            wall_side(body, cx, cy, z0, a, r, TIER_H, opening)
+                opening = (1.65, 0.4, 2.5) if k % 2 else (1.3, 1.0, 2.3)
+            arched = opening is not None and (i > 0 or k != 6)
+            wall_side(body, cx, cy, z0, a, r, TIER_H, opening, arched)
+            if arched:
+                ow, bottom, top = opening
+                points = [(-ow / 2, bottom), (-ow / 2, top - ow / 2)]
+                points += [(ow / 2 * math.cos(math.pi - j * math.pi / 16),
+                            top - ow / 2 + ow / 2 * math.sin(math.pi - j * math.pi / 16))
+                           for j in range(17)]
+                points += [(ow / 2, bottom)]
+                deco.append(molding("window_arch", [
+                    (cx + (ri + 0.17) * math.cos(a) - u * math.sin(a),
+                     cy + (ri + 0.17) * math.sin(a) + u * math.cos(a), z0 + h)
+                    for u, h in points], 0.065, P["white"]))
+
+        gallery(body, deco, cx, cy, r, z0, i)
 
         # --- corner columns
         for k in range(8):
@@ -152,192 +307,40 @@ def build_pagoda(cx, cy, prefix):
                                   (lgx, lgy, z0 + TIER_H - 0.05),
                                   P["wood"], rot=(0, 0, rot_i)))
 
-        # --- eaves: 8 tilted slabs around the perimeter (hollow ring, so
-        #     the tower interior stays clear)
+        # Keep the center hollow so the roof does not cross the stair flight.
         if i < TIERS - 1:
-            ri_w = r * math.cos(math.pi / 8)
-            for k in range(8):
-                a = k * math.pi / 4
-                L = 2 * (ri_w + 1.7) * math.tan(math.pi / 8)
-                ex = cx + (ri_w + 0.7) * math.cos(a)
-                ey = cy + (ri_w + 0.7) * math.sin(a)
-                roofs.append(box("eave", (2.0, L, 0.14),
-                                 (ex, ey, z0 + TIER_H - 0.55), P["roof"],
-                                 rot=(0, 0.32, a)))
-                # fascia strip under the eave edge
-                fx = cx + (ri_w + 1.55) * math.cos(a)
-                fy = cy + (ri_w + 1.55) * math.sin(a)
-                roofs.append(box("fascia", (0.1, L, 0.3),
-                                 (fx, fy, z0 + TIER_H - 1.0), P["roof_dk"],
-                                 rot=(0, 0, a)))
+            eaves(roofs, cx, cy, r, z0 + TIER_H - 0.85)
 
     # --- top roof + spire
     z_top = TIERS * TIER_H
     r_top = R0 - R_STEP * (TIERS - 1)
-    roofs.append(cyl("toproof", r_top + 1.25, 2.4, (cx, cy, z_top + 1.1),
-                     P["roof"], verts=8, radius2=0.25))
-    roofs.append(cyl("fasciaT", r_top + 1.28, 0.16, (cx, cy, z_top - 0.2),
-                     P["roof_dk"], verts=8))
-    deco.append(cyl("spire", 0.12, 2.2, (cx, cy, z_top + 3.2), P["gold"],
-                    verts=8))
-    for j in range(3):
-        deco.append(sphere("orb", 0.32 - j * 0.07,
-                           (cx, cy, z_top + 2.6 + j * 0.65), P["gold"],
-                           segs=10, rings=6))
+    eaves(roofs, cx, cy, r_top, z_top - 0.85, crown=True)
+    deco.append(cyl("spire", 0.09, 4.3, (cx, cy, z_top + 3.05), P["gold"], verts=12))
+    for j in range(7):
+        radius = 0.68 - j * 0.075
+        height = z_top + 1.35 + j * 0.43
+        deco.append(cyl("finial_bell", radius, 0.22, (cx, cy, height),
+                        P["roof_dk"], verts=8, radius2=radius * 0.5))
+        deco.append(cyl("finial_lip", radius, 0.055, (cx, cy, height - 0.11),
+                        P["tile_light"], verts=8))
 
     join(body, f"{prefix}Body-col")
-    join(roofs, f"{prefix}Roof-col")
+    # Decorative tile rolls do not need thousands of physics triangles.
+    join(roofs, f"{prefix}Roof")
     join(stairs_vis, f"{prefix}Stairs")
     join(ramps, f"{prefix}Ramps-colonly")
     join(deco, f"{prefix}Deco")
 
 
 # ----------------------------------------------------------------------------
-def build_tunnel(cx, head_y, tower_wall_y, body_mat, prefix):
-    """Corridor from statue head into the tower door. Walk axis = Y."""
-    parts = []
-    y0, y1 = head_y + 1.1, tower_wall_y + 0.4
-    ymid, ylen = (y0 + y1) / 2, (y1 - y0)
-    parts.append(box("twL", (0.35, ylen, 2.6), (cx - 1.25, ymid, 1.3),
-                     body_mat))
-    parts.append(box("twR", (0.35, ylen, 2.6), (cx + 1.25, ymid, 1.3),
-                     body_mat))
-    parts.append(box("twT", (2.9, ylen, 0.3), (cx, ymid, 2.75), body_mat))
-    return parts
-
-
-def build_dragon(cx, prefix):
-    """Dragon entrance statue, head faces -Y (towards the bridge)."""
-    P_ = P
-    col, deco = [], []
-    head_y = -6.4
-    tower_wall_y = 3 - (R0 * math.cos(math.pi / 8))   # tower front wall
-
-    col += build_tunnel(cx, head_y, tower_wall_y, P_["dragon"], prefix)
-
-    # skull above the mouth
-    col.append(box("skull", (3.2, 2.4, 1.9), (cx, head_y, 3.55),
-                   P_["dragon"]))
-    # cheeks framing the mouth
-    col.append(box("cheekL", (0.9, 2.2, 2.6), (cx - 1.6, head_y, 1.3),
-                   P_["dragon"]))
-    col.append(box("cheekR", (0.9, 2.2, 2.6), (cx + 1.6, head_y, 1.3),
-                   P_["dragon"]))
-    # lower jaw step
-    col.append(box("jaw", (3.4, 2.6, 0.24), (cx, head_y - 0.2, 0.12),
-                   P_["mouth"]))
-    # snout / nose
-    deco.append(box("snout", (2.2, 0.9, 0.8), (cx, head_y - 1.5, 2.95),
-                    P_["dragon"]))
-    deco.append(sphere("noseL", 0.18, (cx - 0.5, head_y - 1.95, 3.1),
-                       P_["tiger_st"], segs=8, rings=6))
-    deco.append(sphere("noseR", 0.18, (cx + 0.5, head_y - 1.95, 3.1),
-                       P_["tiger_st"], segs=8, rings=6))
-    # eyes (emissive)
-    deco.append(sphere("eyeL", 0.3, (cx - 0.85, head_y - 1.22, 3.9),
-                       P_["eye"], segs=10, rings=6))
-    deco.append(sphere("eyeR", 0.3, (cx + 0.85, head_y - 1.22, 3.9),
-                       P_["eye"], segs=10, rings=6))
-    # horns
-    for sx in (-1, 1):
-        deco.append(cone("horn", 0.28, 1.6,
-                         (cx + sx * 0.9, head_y + 0.9, 5.1), P_["gold"],
-                         verts=8, rot=(-0.5, 0, 0)))
-    # whiskers
-    for sx in (-1, 1):
-        deco.append(cyl("whisker", 0.045, 2.6,
-                        (cx + sx * 1.5, head_y - 1.7, 2.2),
-                        P_["dragon_belly"], verts=6,
-                        rot=(0.5, sx * 0.5, 0)))
-    # teeth: upper hanging + lower corner fangs (clear of walkway center)
-    for tx in (-1.0, -0.5, 0.0, 0.5, 1.0):
-        deco.append(cone("toothU", 0.11, 0.45,
-                         (cx + tx, head_y - 1.05, 2.4), P_["white"],
-                         verts=6, rot=(math.pi, 0, 0)))
-    for tx in (-1.05, 1.05):
-        deco.append(cone("fang", 0.13, 0.55, (cx + tx, head_y - 1.0, 0.5),
-                         P_["white"], verts=6))
-    # serpent body over the tunnel + dorsal fins
-    deco.append(cyl("bodyTube", 1.05, 5.4, (cx, -2.6, 3.35), P_["dragon"],
-                    verts=12, rot=(math.pi / 2, 0, 0)))
-    for j in range(5):
-        deco.append(cone("fin", 0.35, 0.9, (cx, -4.6 + j * 1.1, 4.5),
-                         P_["red"], verts=6))
-    # coiled tail arcs beside the tower
-    for j, (ox, oy) in enumerate([(-3.4, 1.0), (3.4, 1.0)]):
-        bpy_obj = cyl("coil", 1.5, 0.8, (cx + ox, oy, 0.6), P_["dragon"],
-                      verts=10)
-        deco.append(bpy_obj)
-
-    join(col, f"{prefix}-col")
-    join(deco, f"{prefix}Deco")
-
-
-def build_tiger(cx, prefix):
-    """Tiger entrance statue, head faces -Y."""
-    P_ = P
-    col, deco = [], []
-    head_y = -6.4
-    tower_wall_y = 3 - (R0 * math.cos(math.pi / 8))
-
-    col += build_tunnel(cx, head_y, tower_wall_y, P_["tiger"], prefix)
-
-    col.append(box("skullT", (3.4, 2.5, 2.0), (cx, head_y, 3.6), P_["tiger"]))
-    col.append(box("cheekTL", (0.95, 2.3, 2.6), (cx - 1.62, head_y, 1.3),
-                   P_["tiger"]))
-    col.append(box("cheekTR", (0.95, 2.3, 2.6), (cx + 1.62, head_y, 1.3),
-                   P_["tiger"]))
-    col.append(box("jawT", (3.5, 2.7, 0.24), (cx, head_y - 0.2, 0.12),
-                   P_["mouth"]))
-    # muzzle
-    deco.append(box("muzzle", (1.9, 0.8, 1.0), (cx, head_y - 1.5, 3.0),
-                    P_["white"]))
-    deco.append(box("noseT", (0.6, 0.3, 0.35), (cx, head_y - 1.95, 3.35),
-                    P_["tiger_st"]))
-    # eyes
-    deco.append(sphere("eyeTL", 0.28, (cx - 0.8, head_y - 1.28, 4.0),
-                       P_["eye"], segs=10, rings=6))
-    deco.append(sphere("eyeTR", 0.28, (cx + 0.8, head_y - 1.28, 4.0),
-                       P_["eye"], segs=10, rings=6))
-    # ears
-    for sx in (-1, 1):
-        deco.append(cone("ear", 0.45, 0.8, (cx + sx * 1.15, head_y + 0.5, 5.0),
-                         P_["tiger"], verts=6))
-    # king mark 王 on forehead
-    for j, (wz, ww) in enumerate([(4.75, 1.1), (4.45, 0.8), (4.15, 1.1)]):
-        deco.append(box(f"wang{j}", (ww, 0.1, 0.16),
-                        (cx, head_y - 1.28, wz), P_["tiger_st"]))
-    deco.append(box("wangV", (0.16, 0.1, 0.75), (cx, head_y - 1.28, 4.45),
-                    P_["tiger_st"]))
-    # fangs
-    for tx in (-1.05, 1.05):
-        deco.append(cone("fangT", 0.14, 0.6, (cx + tx, head_y - 1.05, 0.55),
-                         P_["white"], verts=6))
-    for tx in (-0.9, 0.9):
-        deco.append(cone("fangTU", 0.13, 0.5,
-                         (cx + tx, head_y - 1.05, 2.35), P_["white"],
-                         verts=6, rot=(math.pi, 0, 0)))
-    # body over tunnel with stripes
-    deco.append(box("bodyT", (2.6, 5.2, 1.5), (cx, -2.7, 3.45), P_["tiger"]))
-    for j in range(4):
-        deco.append(box(f"stripe{j}", (2.7, 0.35, 1.55),
-                        (cx, -4.4 + j * 1.15, 3.45), P_["tiger_st"]))
-    # legs
-    for sx, sy in ((-1.05, -4.9), (1.05, -4.9), (-1.05, -0.8), (1.05, -0.8)):
-        col.append(cyl("legT", 0.38, 2.7, (cx + sx * 1.35, sy, 1.35),
-                       P_["tiger"], verts=8))
-    # tail
-    deco.append(cyl("tail", 0.16, 2.4, (cx + 1.2, 0.6, 3.4), P_["tiger"],
-                    verts=6, rot=(0.9, 0.7, 0)))
-
-    join(col, f"{prefix}-col")
-    join(deco, f"{prefix}Deco")
-
-
-# ----------------------------------------------------------------------------
 def build_platform():
     parts = []
-    parts.append(box("plat", (34, 22, 2.0), (0, 0.5, -1.0), P["stone"]))
+    parts.append(box("plat", (34, 22, 0.55), (0, 0.5, -0.275), P["stone"]))
+    parts.append(box("plinth_trim", (34.4, 22.4, 0.13), (0, 0.5, -0.18), P["white"]))
+    for x in range(-15, 16, 5):
+        for y in (-9, 10):
+            parts.append(box("platform_pile", (0.55, 0.55, 2.7),
+                             (x, y, -1.7), P["stone"]))
     # perimeter parapet with a gap at the bridge landing (south center)
     t, h = 0.3, 1.0
     edges = [
@@ -349,8 +352,20 @@ def build_platform():
         (10.1, -10.35, 13.5, t),             # south-east of gap
     ]
     for j, (ex, ey, sx, sy) in enumerate(edges):
-        parts.append(box(f"parapet{j}", (sx, sy, h), (ex, ey, h / 2),
-                         P["stone_dk"]))
+        parts.append(box(f"parapet{j}", (sx, sy, 0.58), (ex, ey, 0.4),
+                          P["stone_dk"]))
+        parts.append(box("parapet_cap", (sx, sy, 0.13), (ex, ey, 0.85), P["stone"]))
+        count = max(1, round(max(sx, sy) / 1.8))
+        for i in range(count + 1):
+            u = i / count - 0.5
+            x, y = ex + (sx * u if sx > sy else 0), ey + (sy * u if sy > sx else 0)
+            parts.append(box("stone_post", (0.3, 0.3, h), (x, y, h / 2), P["stone"]))
+            parts.append(box("stone_cap", (0.36, 0.36, 0.1), (x, y, h), P["white"]))
+        for i in range(count):
+            u = (i + 0.5) / count - 0.5
+            x, y = ex + (sx * u if sx > sy else 0), ey + (sy * u if sy > sx else 0)
+            size = (sx / count - 0.42, sy + 0.025, 0.30) if sx > sy else (sx + 0.025, sy / count - 0.42, 0.30)
+            parts.append(box("recessed_panel", size, (x, y, 0.4), P["stone"]))
     join(parts, "Platform-col")
 
 
@@ -377,8 +392,7 @@ def main():
     build_platform()
     build_pagoda(-8, 3, "DragonTower")   # dragon = west tower
     build_pagoda(8, 3, "TigerTower")     # tiger  = east tower
-    build_dragon(-8, "DragonStatue")
-    build_tiger(8, "TigerStatue")
+    build_statues(P, R0)
     build_lanterns()
     export_glb(os.path.abspath(OUT))
 

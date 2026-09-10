@@ -42,7 +42,7 @@ def box(name, size, loc, material=None, rot=(0, 0, 0)):
     o = bpy.context.active_object
     o.name = name
     o.scale = (size[0], size[1], size[2])
-    bpy.ops.object.transform_apply(scale=True)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     if material:
         set_mat(o, material)
     return o
@@ -83,7 +83,7 @@ def sphere(name, radius, loc, material=None, segs=16, rings=8, scale=None):
     o.name = name
     if scale:
         o.scale = scale
-        bpy.ops.object.transform_apply(scale=True)
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     if material:
         set_mat(o, material)
     return o
@@ -113,13 +113,16 @@ def export_glb(filepath):
 # ---- palette ----
 def palette():
     return {
-        "wall":      mat("wall", (0.85, 0.78, 0.62), rough=0.9),
+        "wall":      mat("wall", (0.88, 0.62, 0.22), rough=0.85),
         "wall_in":   mat("wall_in", (0.45, 0.40, 0.34), rough=0.95),
-        "red":       mat("red_col", (0.55, 0.06, 0.05), rough=0.7),
-        "roof":      mat("roof", (0.75, 0.35, 0.08), rough=0.6),
-        "roof_dk":   mat("roof_dk", (0.45, 0.18, 0.05), rough=0.6),
-        "stone":     mat("stone", (0.42, 0.42, 0.44), rough=0.95),
-        "stone_dk":  mat("stone_dk", (0.25, 0.25, 0.27), rough=0.95),
+        "red":       mat("red_col", (0.65, 0.035, 0.025), rough=0.55),
+        "roof":      mat("roof", (0.78, 0.29, 0.055), rough=0.42),
+        "tile_light": mat("tile_light", (0.95, 0.49, 0.12), rough=0.4),
+        "roof_dk":   mat("roof_dk", (0.30, 0.115, 0.035), rough=0.65),
+        "jade":      mat("jade", (0.045, 0.28, 0.18), rough=0.45),
+        "blue":      mat("blue", (0.025, 0.19, 0.4), rough=0.45),
+        "stone":     mat("stone", (0.43, 0.48, 0.43), rough=0.95),
+        "stone_dk":  mat("stone_dk", (0.23, 0.29, 0.25), rough=0.95),
         "gold":      mat("gold", (0.8, 0.6, 0.15), rough=0.35, metal=0.8),
         "dragon":    mat("dragon", (0.12, 0.45, 0.28), rough=0.6),
         "dragon_belly": mat("dragon_belly", (0.85, 0.75, 0.4), rough=0.7),

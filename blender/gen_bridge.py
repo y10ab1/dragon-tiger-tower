@@ -7,6 +7,8 @@ import math
 import os
 import sys
 
+import bpy
+
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from common import (clear_scene, palette, box, cyl, sphere, join, export_glb)
 
@@ -37,19 +39,35 @@ def segment(parts, rails, x0, y0, x1, y1):
         rails.append(box("kerb", (L - 2.6, 0.2, 0.25),
                          (cx + ox, cy + oy, 0.12), P["stone_dk"],
                          rot=(0, 0, ang)))
-        # railing
-        rails.append(box("railT", (L - 2.6, 0.12, 0.12),
-                         (cx + ox, cy + oy, RAIL_H), P["red"],
+        # Stone balustrades stay inside the kerb and stop before turn overlaps.
+        span = L - 2.6
+        rails.append(box("railCap", (span, 0.2, 0.12),
+                         (cx + ox, cy + oy, RAIL_H), P["stone"],
                          rot=(0, 0, ang)))
-        n_posts = max(2, int(L / 1.6))
+        n_posts = max(1, math.ceil(span / 1.5))
+        spacing = (span - 0.2) / n_posts
         for p in range(n_posts + 1):
-            t = -0.5 + (p / n_posts) * ((L - 2.6) / L)
-            t = (p / n_posts - 0.5) * (L - 2.6) / L
-            px = cx + t * L * math.cos(ang) + ox
-            py = cy + t * L * math.sin(ang) + oy
-            rails.append(box("post", (0.12, 0.12, RAIL_H),
-                             (px, py, RAIL_H / 2), P["red"],
+            along = (p / n_posts - 0.5) * (span - 0.2)
+            px = cx + along * math.cos(ang) + ox
+            py = cy + along * math.sin(ang) + oy
+            rails.append(box("stonePost", (0.18, 0.18, RAIL_H),
+                             (px, py, RAIL_H / 2), P["stone"],
                              rot=(0, 0, ang)))
+            rails.append(box("postCap", (0.2, 0.2, 0.08),
+                             (px, py, RAIL_H + 0.02), P["stone"],
+                             rot=(0, 0, ang)))
+            if p == n_posts:
+                continue
+            mx = px + spacing * 0.5 * math.cos(ang)
+            my = py + spacing * 0.5 * math.sin(ang)
+            # Thin inset field leaves a real recess on both faces of the frame.
+            rails.append(box("recessedPanel", (spacing - 0.18, 0.09, 0.58),
+                             (mx, my, 0.6), P["stone_dk"], rot=(0, 0, ang)))
+            rails.append(box("panelField", (spacing - 0.27, 0.11, 0.43),
+                             (mx, my, 0.6), P["stone"], rot=(0, 0, ang)))
+            for z in (0.3, 0.91):
+                rails.append(box("panelMoulding", (spacing, 0.18, 0.1),
+                                 (mx, my, z), P["stone"], rot=(0, 0, ang)))
     # piles into the water
     for t in (-0.3, 0.3):
         px = cx + t * L * math.cos(ang)
@@ -80,8 +98,50 @@ def pavilion(cx, cy):
             parts.append(cyl("pcol", 0.28, 3.4,
                              (cx + sx * 3.4, cy + sy * 3.4, 1.7), P["red"],
                              verts=10))
-    deco.append(cyl("proof", 6.8, 2.2, (cx, cy, 4.3), P["roof"], verts=4,
-                    radius2=0.3, rot=(0, 0, math.pi / 4)))
+    # Square hip roof: concave slopes, lifted corners, and a pale tiled lip.
+    profile = [(0.1, 5.45), (0.9, 5.12), (2.0, 4.48), (3.1, 3.95),
+               (4.1, 3.68), (4.7, 3.72), (4.8, 3.76)]
+    vertices, faces, materials = [], [], []
+    ring_size = 48
+    for half_w, z in profile:
+        for side in range(4):
+            angle = side * math.pi / 2
+            for j in range(12):
+                t = -1 + j / 6
+                x, y = half_w, half_w * t
+                lift = 0.48 * abs(t) ** 6 * (half_w / 4.8) ** 4
+                vertices.append((cx + x * math.cos(angle) - y * math.sin(angle),
+                                 cy + x * math.sin(angle) + y * math.cos(angle),
+                                 z + lift))
+    top_count = len(vertices)
+    vertices += [(x, y, z - 0.12) for x, y, z in vertices]
+    faces.extend((tuple(range(ring_size)),
+                  tuple(top_count + j for j in reversed(range(ring_size)))))
+    materials.extend((0, 2))
+    for ring in range(len(profile) - 1):
+        for j in range(ring_size):
+            a = ring * ring_size + j
+            b = ring * ring_size + (j + 1) % ring_size
+            face = (a, a + ring_size, b + ring_size, b)
+            faces.append(face)
+            materials.append(1 if ring == len(profile) - 2 else 0)
+            faces.append(tuple(v + top_count for v in reversed(face)))
+            materials.append(2)
+    for j in range(ring_size):
+        a = top_count - ring_size + j
+        b = top_count - ring_size + (j + 1) % ring_size
+        faces.append((a, a + top_count, b + top_count, b))
+        materials.append(1)
+    mesh = bpy.data.meshes.new("pavilionCurvedRoof")
+    mesh.from_pydata(vertices, [], faces)
+    mesh.update()
+    roof = bpy.data.objects.new("pavilionCurvedRoof", mesh)
+    bpy.context.collection.objects.link(roof)
+    for material in (P["roof"], P["tile_light"], P["roof_dk"]):
+        mesh.materials.append(material)
+    for face, material_index in zip(mesh.polygons, materials):
+        face.material_index = material_index
+    deco.append(roof)
     deco.append(box("pbeamN", (7.4, 0.3, 0.5), (cx, cy - 3.4, 3.3), P["red"]))
     deco.append(box("pbeamS", (7.4, 0.3, 0.5), (cx, cy + 3.4, 3.3), P["red"]))
     deco.append(box("pbeamW", (0.3, 7.4, 0.5), (cx - 3.4, cy, 3.3), P["red"]))

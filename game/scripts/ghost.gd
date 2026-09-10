@@ -10,6 +10,7 @@ const REPEL_SPEED := 2.2
 const SIGHT_RANGE := 16.0
 const CATCH_DIST := 1.3
 const LOSE_SIGHT_TIME := 4.0
+const REPEL_DURATION := 1.4
 
 var state: int = State.WANDER
 var waypoints: Array[Vector3] = []
@@ -18,6 +19,7 @@ var _lose_sight := 0.0
 var _repel_time := 0.0
 var _bob := 0.0
 var player: Node3D = null
+var illuminated := false
 
 @onready var mesh_root: Node3D = $GhostMesh
 @onready var moan: AudioStreamPlayer3D = $Moan
@@ -42,6 +44,7 @@ func _physics_process(delta: float) -> void:
 	if player == null or waypoints.is_empty():
 		return
 	if player.get("dead") or player.get("won"):
+		illuminated = false
 		velocity = Vector3.ZERO
 		return
 
@@ -51,6 +54,7 @@ func _physics_process(delta: float) -> void:
 	var to_player := player.global_position - global_position
 	var dist := to_player.length()
 	var lit: bool = player.call("flashlight_hits", self)
+	illuminated = lit
 	var sees := _can_see_player(dist)
 
 	match state:
@@ -63,7 +67,7 @@ func _physics_process(delta: float) -> void:
 		State.CHASE:
 			if lit:
 				_repel_time += delta
-				if _repel_time > 1.4:
+				if _repel_time > REPEL_DURATION:
 					state = State.REPELLED
 					_repel_time = 0.0
 			else:
@@ -107,6 +111,10 @@ func _enter_chase() -> void:
 	state = State.CHASE
 	_lose_sight = 0.0
 	glow.light_energy = 2.0
+
+
+func repel_progress() -> float:
+	return clampf(_repel_time / REPEL_DURATION, 0.0, 1.0) if state == State.CHASE else 0.0
 
 
 func _can_see_player(dist: float) -> bool:

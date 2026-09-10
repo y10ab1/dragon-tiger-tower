@@ -24,24 +24,40 @@ var _step_accum := 0.0
 
 
 func _ready() -> void:
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# Browsers require a click/key event before granting pointer lock.
+	if not OS.has_feature("web"):
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
+	# Captured motion must run before GUI hit-testing (the reticle sits under
+	# the captured pointer). Decorative HUD Controls also ignore mouse input.
+	if dead or won:
+		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		rotate_y(-event.relative.x * MOUSE_SENS)
-		head.rotate_x(-event.relative.y * MOUSE_SENS)
-		head.rotation.x = clampf(head.rotation.x, -1.45, 1.45)
-	elif event.is_action_pressed("flashlight"):
+		rotate_y(-event.screen_relative.x * MOUSE_SENS)
+		head.rotation.x = clampf(head.rotation.x - event.screen_relative.y * MOUSE_SENS,
+				-1.45, 1.45)
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("flashlight") and not event.is_echo():
 		flashlight.visible = not flashlight.visible
-	elif event.is_action_pressed("ui_cancel"):
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("ui_cancel") and not event.is_echo():
 		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		else:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and event.pressed \
+			and event.button_index == MOUSE_BUTTON_LEFT \
 			and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		get_viewport().set_input_as_handled()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
 func _physics_process(delta: float) -> void:
@@ -92,19 +108,19 @@ func _physics_process(delta: float) -> void:
 
 func flashlight_hits(target: Node3D) -> bool:
 	## Whether the flashlight beam is currently shining on `target`.
-	if not flashlight.visible:
+	if dead or won or not flashlight.is_visible_in_tree():
 		return false
 	var to_target: Vector3 = target.global_position + Vector3.UP * 1.5 \
-			- cam.global_position
+			- flashlight.global_position
 	var dist := to_target.length()
-	if dist > 14.0:
+	if dist > flashlight.spot_range:
 		return false
-	var fwd := -cam.global_transform.basis.z
-	if fwd.dot(to_target.normalized()) < 0.90:
+	var fwd := -flashlight.global_transform.basis.z
+	if fwd.dot(to_target.normalized()) < cos(deg_to_rad(flashlight.spot_angle)):
 		return false
 	var space := get_world_3d().direct_space_state
 	var ray := PhysicsRayQueryParameters3D.create(
-			cam.global_position, target.global_position + Vector3.UP * 1.5)
+			flashlight.global_position, target.global_position + Vector3.UP * 1.5)
 	ray.exclude = [get_rid()]
 	var hit := space.intersect_ray(ray)
 	if hit.is_empty():
@@ -116,6 +132,7 @@ func kill() -> void:
 	if dead or won:
 		return
 	dead = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	died.emit()
 
 
@@ -123,4 +140,5 @@ func win() -> void:
 	if dead or won:
 		return
 	won = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	escaped.emit()

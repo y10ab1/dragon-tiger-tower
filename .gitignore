@@ -10,3 +10,5 @@ __pycache__/
 # Misc
 *.import.tmp
 .DS_Store
+build/
+.playwright-cli/
